@@ -3,6 +3,7 @@ import { healthRouter } from './health.routes';
 import { authRouter } from './auth.routes';
 import { aqiRouter } from './aqi.routes';
 import { reportRouter } from './report.routes';
+import { anomalyRouter } from './anomaly.routes';
 import publicHeatmapRouter from './publicHeatmap';
 
 /**
@@ -15,4 +16,5 @@ apiRouter.use('/health', healthRouter);
 apiRouter.use('/auth', authRouter);
 apiRouter.use('/aqi', aqiRouter);
 apiRouter.use('/reports', reportRouter);
+apiRouter.use('/anomaly', anomalyRouter);
 apiRouter.use('/public', publicHeatmapRouter);

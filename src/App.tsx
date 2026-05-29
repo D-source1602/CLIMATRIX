@@ -10,6 +10,7 @@ import CapabilitiesModal from "./components/CapabilitiesModal";
 import LiveAirQualityPanel from "./components/LiveAirQualityPanel";
 import { registerUser, loginUser, logoutUser, bootstrapUser } from "./lib/auth";
 import { listReports, generateReport as generateReportApi, deleteReport as deleteReportApi, downloadReport, uiTypeToBackend, formatBytes } from "./lib/reports";
+import { detectAnomaly } from "./lib/anomaly";
  
 // ── STORAGE ──────────────────────────────────────────────────────────────────
 const S = {
@@ -719,6 +720,32 @@ const Dashboard = ({ emissions, setPage }) => {
     { lvl: 'INFO',     msg: 'Satellite batch synchronized', t: '34 min ago', bc: 'b-blue' },
     { lvl: 'OK',       msg: 'Monthly compliance report dispatched', t: '1 hr ago', bc: 'b-green' },
   ];
+
+  // Anomaly detection — calls /api/v1/anomaly/detect with a sample series.
+  // (When real emission submission is wired, the readings will come from the DB.)
+  const mockEmissionReadings = [
+    { timestamp: '2026-05-29T10:00:00Z', co2: 120 },
+    { timestamp: '2026-05-29T11:00:00Z', co2: 125 },
+    { timestamp: '2026-05-29T12:00:00Z', co2: 132 },
+    { timestamp: '2026-05-29T13:00:00Z', co2: 128 },
+    { timestamp: '2026-05-29T14:00:00Z', co2: 260 },
+  ];
+  const [anomalyResult, setAnomalyResult] = useState(null);
+  const [anomalyLoading, setAnomalyLoading] = useState(false);
+  const [anomalyError, setAnomalyError] = useState('');
+
+  const runAnomalyDetection = async () => {
+    setAnomalyLoading(true);
+    setAnomalyError('');
+    try {
+      const data = await detectAnomaly(mockEmissionReadings);
+      setAnomalyResult(data);
+    } catch (e) {
+      setAnomalyError(e?.message || 'Unable to reach anomaly engine. Is the backend running?');
+    } finally {
+      setAnomalyLoading(false);
+    }
+  };
  
   const caps = [
     { n: 'Real-Time Monitoring', d: '30-sec sensor refresh · 240 stations' },
@@ -922,6 +949,41 @@ const Dashboard = ({ emissions, setPage }) => {
         >
           {cap.d}
         </div>
+
+        {cap.n === 'AI Anomaly Detection' && (
+          <div style={{ marginTop: 10 }}>
+            <button
+              className="btn btn-xs"
+              onClick={(e) => { e.stopPropagation(); runAnomalyDetection(); }}
+              disabled={anomalyLoading}
+              style={{ width: '100%', fontSize: 9, letterSpacing: '0.08em', opacity: anomalyLoading ? 0.7 : 1 }}
+            >
+              {anomalyLoading ? 'SCANNING...' : 'RUN SPIKE SCAN'}
+            </button>
+            {anomalyError && (
+              <div style={{ marginTop: 8, padding: '7px 8px', border: '1px solid var(--red)', background: 'var(--redx)', color: 'var(--red)', fontFamily: 'Special Elite', fontSize: 8, lineHeight: 1.5 }}>
+                {anomalyError}
+              </div>
+            )}
+            {anomalyResult?.hasAnomaly ? (
+              <div style={{ marginTop: 8, padding: '8px 9px', border: '1px solid var(--red)', background: 'var(--redx)', fontFamily: 'Special Elite', fontSize: 8, lineHeight: 1.55 }}>
+                <div style={{ color: 'var(--red)', fontWeight: 700, letterSpacing: '0.08em', marginBottom: 5 }}>CARBON SPIKE DETECTED</div>
+                {anomalyResult.alerts.map((alert, idx) => (
+                  <div key={idx} style={{ borderTop: idx ? '1px dashed var(--ink5)' : 'none', paddingTop: idx ? 6 : 0, marginTop: idx ? 6 : 0 }}>
+                    <div>CO2 VALUE: {alert.value}</div>
+                    <div>SEVERITY: {String(alert.severity).toUpperCase()}</div>
+                    <div>CONFIDENCE: {(alert.confidence * 100).toFixed(0)}%</div>
+                    <div>REASON: {alert.reason}</div>
+                  </div>
+                ))}
+              </div>
+            ) : anomalyResult ? (
+              <div style={{ marginTop: 8, padding: '8px 9px', border: '1px solid var(--green)', background: 'var(--greenx)', color: 'var(--green)', fontFamily: 'Special Elite', fontSize: 8, lineHeight: 1.5 }}>
+                NO ABNORMAL EMISSION SPIKE DETECTED
+              </div>
+            ) : null}
+          </div>
+        )}
       </div>
     ))}
   </div>
