@@ -6,6 +6,7 @@ import { requestLogger } from './middleware/requestLogger';
 import { notFound } from './middleware/notFound';
 import { errorHandler } from './middleware/errorHandler';
 import { apiRouter } from './routes';
+import anomalyRoute from './routes/anomaly';
 
 export function createApp(): Express {
   const app = express();
@@ -33,6 +34,8 @@ export function createApp(): Express {
 
   // Routes
   app.use('/api/v1', apiRouter);
+
+  app.use('/api/v1/anomaly', anomalyRoute);
 
   // 404 + global error handler MUST be last
   app.use(notFound);

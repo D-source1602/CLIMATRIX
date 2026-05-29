@@ -4,7 +4,18 @@ import { env } from './config/env';
 import { logger } from './utils/logger';
 import { disconnectPrisma } from './prisma/client';
 
+
 const app = createApp();
+
+
+
+app.get('/api/v1/health', (_req, res) => {
+  res.json({
+    status: 'ok',
+    message: 'ClimaCore backend is running',
+  });
+});
+
 const server = http.createServer(app);
 
 server.listen(env.PORT, () => {
@@ -14,17 +25,18 @@ server.listen(env.PORT, () => {
 });
 
 let shuttingDown = false;
+
 async function shutdown(signal: string): Promise<void> {
   if (shuttingDown) return;
   shuttingDown = true;
 
   logger.info({ signal }, 'Shutdown initiated');
 
-  // Stop accepting new connections, then close cleanly.
   server.close(async (err) => {
     if (err) {
       logger.error({ err }, 'Error closing HTTP server');
     }
+
     try {
       await disconnectPrisma();
       logger.info('Clean shutdown complete');
@@ -35,7 +47,6 @@ async function shutdown(signal: string): Promise<void> {
     }
   });
 
-  // Force-kill if shutdown hangs (stuck connections, etc.).
   setTimeout(() => {
     logger.error('Forced shutdown after 10s timeout');
     process.exit(1);
@@ -52,11 +63,4 @@ process.on('unhandledRejection', (reason) => {
 process.on('uncaughtException', (err) => {
   logger.fatal({ err }, 'Uncaught exception — exiting');
   process.exit(1);
-});
-
-app.get("/api/v1/health", (_req, res) => {
-  res.json({
-    status: "ok",
-    message: "ClimaCore backend is running",
-  });
 });

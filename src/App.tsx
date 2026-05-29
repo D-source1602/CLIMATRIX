@@ -663,6 +663,48 @@ const Dashboard = ({ emissions, setPage }) => {
     { lvl: 'INFO',     msg: 'Satellite batch synchronized', t: '34 min ago', bc: 'b-blue' },
     { lvl: 'OK',       msg: 'Monthly compliance report dispatched', t: '1 hr ago', bc: 'b-green' },
   ];
+
+  const mockEmissionReadings = [
+    { timestamp: '2026-05-29T10:00:00Z', co2: 120 },
+    { timestamp: '2026-05-29T11:00:00Z', co2: 125 },
+    { timestamp: '2026-05-29T12:00:00Z', co2: 132 },
+    { timestamp: '2026-05-29T13:00:00Z', co2: 128 },
+    { timestamp: '2026-05-29T14:00:00Z', co2: 260 },
+  ];
+
+  const [anomalyResult, setAnomalyResult] = useState(null);
+  const [anomalyLoading, setAnomalyLoading] = useState(false);
+  const [anomalyError, setAnomalyError] = useState('');
+
+  const runAnomalyDetection = async () => {
+    setAnomalyLoading(true);
+    setAnomalyError('');
+
+    try {
+      const response = await fetch('http://localhost:5000/api/v1/anomaly/detect', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          readings: mockEmissionReadings,
+        }),
+      });
+
+      const data = await response.json();
+
+      if (!response.ok) {
+        throw new Error(data?.error?.message || data?.summary || 'Anomaly scan failed');
+      }
+
+      setAnomalyResult(data);
+    } catch (error) {
+      console.error('Anomaly detection failed:', error);
+      setAnomalyError('Unable to reach anomaly engine. Check that backend is running on port 5000.');
+    } finally {
+      setAnomalyLoading(false);
+    }
+  };
  
   const caps = [
     { n: 'Real-Time Monitoring', d: '30-sec sensor refresh · 240 stations' },
@@ -863,6 +905,86 @@ const Dashboard = ({ emissions, setPage }) => {
         >
           {cap.d}
         </div>
+
+        {cap.n === 'AI Anomaly Detection' && (
+          <div style={{ marginTop: 10 }}>
+            <button
+              className="btn btn-xs"
+              onClick={(e) => {
+                e.stopPropagation();
+                runAnomalyDetection();
+              }}
+              disabled={anomalyLoading}
+              style={{
+                width: '100%',
+                fontSize: 9,
+                letterSpacing: '0.08em',
+                opacity: anomalyLoading ? 0.7 : 1,
+              }}
+            >
+              {anomalyLoading ? 'SCANNING...' : 'RUN SPIKE SCAN'}
+            </button>
+
+            {anomalyError && (
+              <div
+                style={{
+                  marginTop: 8,
+                  padding: '7px 8px',
+                  border: '1px solid var(--red)',
+                  background: 'var(--redx)',
+                  color: 'var(--red)',
+                  fontFamily: 'Special Elite',
+                  fontSize: 8,
+                  lineHeight: 1.5,
+                }}
+              >
+                ⚠ {anomalyError}
+              </div>
+            )}
+
+            {anomalyResult?.hasAnomaly ? (
+              <div
+                style={{
+                  marginTop: 8,
+                  padding: '8px 9px',
+                  border: '1px solid var(--red)',
+                  background: 'var(--redx)',
+                  fontFamily: 'Special Elite',
+                  fontSize: 8,
+                  lineHeight: 1.55,
+                }}
+              >
+                <div style={{ color: 'var(--red)', fontWeight: 700, letterSpacing: '0.08em', marginBottom: 5 }}>
+                  ⚠ CARBON SPIKE DETECTED
+                </div>
+
+                {anomalyResult.alerts.map((alert, idx) => (
+                  <div key={idx} style={{ borderTop: idx ? '1px dashed var(--ink5)' : 'none', paddingTop: idx ? 6 : 0, marginTop: idx ? 6 : 0 }}>
+                    <div>CO₂ VALUE: {alert.value}</div>
+                    <div>SEVERITY: {String(alert.severity).toUpperCase()}</div>
+                    <div>CONFIDENCE: {(alert.confidence * 100).toFixed(0)}%</div>
+                    <div>REASON: {alert.reason}</div>
+                  </div>
+                ))}
+              </div>
+            ) : anomalyResult ? (
+              <div
+                style={{
+                  marginTop: 8,
+                  padding: '8px 9px',
+                  border: '1px solid var(--green)',
+                  background: 'var(--greenx)',
+                  color: 'var(--green)',
+                  fontFamily: 'Special Elite',
+                  fontSize: 8,
+                  lineHeight: 1.5,
+                }}
+              >
+                ✅ NO ABNORMAL EMISSION SPIKE DETECTED
+              </div>
+            ) : null}
+          </div>
+        )}
       </div>
     ))}
   </div>
