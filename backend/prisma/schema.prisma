@@ -105,6 +105,7 @@ model User {
   // Audit linkage
   emissionLogsSubmitted EmissionLog[]      @relation("EmissionLogSubmitter")
   noticesIssued         ComplianceNotice[] @relation("NoticeIssuer")
+  reportsGenerated      Report[]           @relation("ReportsGenerated")
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -155,6 +156,7 @@ model Industry {
   inspectorAssignments InspectorAssignment[]
   emissionLogs         EmissionLog[]
   complianceNotices    ComplianceNotice[]
+  reports              Report[]
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -313,4 +315,52 @@ model ComplianceNotice {
   @@index([status])
   @@index([issuedAt])
   @@map("compliance_notices")
+}
+
+
+
+// -----------------------------------------------------------------------------
+// REPORTS — auto-generated PDFs (and future CSVs) stored on local disk.
+// -----------------------------------------------------------------------------
+
+enum ReportType {
+  EMISSIONS_MONTHLY
+  EMISSIONS_QUARTERLY
+  COMPLIANCE_QUARTERLY
+  ANNUAL_REPORT
+  FACILITY_AUDIT
+  AI_INSIGHTS
+  CUSTOM
+}
+
+enum ReportFormat {
+  PDF
+  CSV
+}
+
+model Report {
+  id          String       @id @default(cuid())
+  type        ReportType
+  format      ReportFormat @default(PDF)
+  title       String
+  periodStart DateTime?
+  periodEnd   DateTime?
+
+  // Local file artifact: relative path under backend/files/ (e.g. "reports/abc.pdf").
+  storageKey String
+  sizeBytes  Int
+  pageCount  Int?
+
+  generatedById String?
+  generatedBy   User?   @relation("ReportsGenerated", fields: [generatedById], references: [id], onDelete: SetNull)
+
+  industryId String?
+  industry   Industry? @relation(fields: [industryId], references: [id], onDelete: SetNull)
+
+  createdAt DateTime @default(now())
+
+  @@index([createdAt(sort: Desc)])
+  @@index([generatedById])
+  @@index([industryId, createdAt(sort: Desc)])
+  @@map("reports")
 }

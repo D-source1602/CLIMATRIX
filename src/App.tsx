@@ -8,6 +8,7 @@ import {
 } from "recharts";
 import CapabilitiesModal from "./components/CapabilitiesModal";
 import { registerUser, loginUser, logoutUser, bootstrapUser } from "./lib/auth";
+import { listReports, generateReport as generateReportApi, deleteReport as deleteReportApi, downloadReport, uiTypeToBackend, formatBytes } from "./lib/reports";
  
 // ── STORAGE ──────────────────────────────────────────────────────────────────
 const S = {
@@ -1267,28 +1268,82 @@ const Compliance = ({ emissions }) => {
  
 // ── REPORTS ───────────────────────────────────────────────────────────────────
 const Reports = ({ user, emissions }) => {
-  const initR = [
-    { id: 1, name: 'Monthly Emissions — May 2024',   date: '2024-05-20', size: '2.4 MB', type: 'Monthly Emissions', records: 0 },
-    { id: 2, name: 'Quarterly Compliance — Q2 2024', date: '2024-05-15', size: '5.8 MB', type: 'Quarterly Compliance', records: 0 },
-  ];
-  const [reports, setReports] = useState(() => S.get('reports', initR));
+  const [reports, setReports] = useState([]);
   const [rtype, setRtype] = useState('Monthly Emissions');
   const [period, setPeriod] = useState('Current Month');
   const [gen, setGen] = useState(false);
- 
+  const [genError, setGenError] = useState('');
+  const [loadError, setLoadError] = useState('');
+  const [loading, setLoading] = useState(true);
+
   const sizes = { 'Monthly Emissions': '2.4 MB', 'Quarterly Compliance': '5.8 MB', 'Annual Report': '12.3 MB', 'Facility Audit': '3.1 MB', 'AI Insights': '1.8 MB' };
- 
-  const generate = () => {
-    if (gen) return; setGen(true);
-    setTimeout(() => {
-      const entry = { id: Date.now(), name: `${rtype} — ${period}`, date: new Date().toISOString().split('T')[0], size: sizes[rtype] || '2.0 MB', type: rtype, records: emissions.length };
-      const next = [entry, ...reports]; setReports(next); S.set('reports', next);
-      setGen(false);
-    }, 2400);
+
+  // Load reports from backend on mount
+  useEffect(() => {
+    let cancelled = false;
+    listReports()
+      .then(r => { if (!cancelled) { setReports(r.reports); setLoadError(''); } })
+      .catch(e => { if (!cancelled) setLoadError(e?.message || 'Failed to load reports'); })
+      .finally(() => { if (!cancelled) setLoading(false); });
+    return () => { cancelled = true; };
+  }, []);
+
+  // Map UI period selector → ISO date range
+  const periodToRange = (label) => {
+    const now = new Date();
+    const startOfMonth = (d) => new Date(d.getFullYear(), d.getMonth(), 1);
+    const endOfMonth = (d) => new Date(d.getFullYear(), d.getMonth() + 1, 0, 23, 59, 59);
+    if (label === 'Current Month') return [startOfMonth(now), now];
+    if (label === 'Last Month') {
+      const prev = new Date(now.getFullYear(), now.getMonth() - 1, 1);
+      return [prev, endOfMonth(prev)];
+    }
+    if (label === 'Q2 2024') return [new Date('2024-04-01'), new Date('2024-06-30T23:59:59')];
+    if (label === 'Q1 2024') return [new Date('2024-01-01'), new Date('2024-03-31T23:59:59')];
+    if (label === 'Full Year 2024') return [new Date('2024-01-01'), new Date('2024-12-31T23:59:59')];
+    return [startOfMonth(now), now];
   };
- 
-  const delR = id => { const next = reports.filter(r => r.id !== id); setReports(next); S.set('reports', next); };
- 
+
+  const generate = async () => {
+    if (gen) return;
+    setGen(true);
+    setGenError('');
+    try {
+      const [periodStart, periodEnd] = periodToRange(period);
+      const created = await generateReportApi({
+        type: uiTypeToBackend(rtype),
+        periodStart: periodStart.toISOString(),
+        periodEnd: periodEnd.toISOString(),
+      });
+      // Refresh the list so the new report appears with backend metadata.
+      const fresh = await listReports();
+      setReports(fresh.reports);
+    } catch (e) {
+      setGenError(e?.message || 'Failed to generate report');
+    } finally {
+      setGen(false);
+    }
+  };
+
+  const delR = async (id) => {
+    const prev = reports;
+    setReports(reports.filter(r => r.id !== id));
+    try {
+      await deleteReportApi(id);
+    } catch (e) {
+      setReports(prev);
+      setGenError(e?.message || 'Failed to delete report');
+    }
+  };
+
+  const handleDownload = async (r) => {
+    try {
+      await downloadReport(r.id, r.title || 'report');
+    } catch (e) {
+      setGenError(e?.message || 'Download failed');
+    }
+  };
+
   const monthBar = () => {
     const m = {};
     emissions.forEach(e => { const mo = e.date?.slice(0, 7) || '?'; if (!m[mo]) m[mo] = { mo: mo.slice(5), co2: 0, n: 0 }; m[mo].co2 += e.co2; m[mo].n++; });
@@ -1352,20 +1407,27 @@ const Reports = ({ user, emissions }) => {
           <div className="sketch-panel a3" style={{ padding: '18px' }}>
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 14 }}>
               <div className="stitle" style={{ margin: 0 }}>Report Archive <span style={{ fontFamily: 'Special Elite', fontSize: 9, color: 'var(--ink4)', fontWeight: 400, marginLeft: 10 }}>// {reports.length} FILES</span></div>
-              {reports.length > 0 && <button className="btn btn-sm btn-danger" onClick={() => { setReports([]); S.set('reports', []); }}>CLEAR ALL</button>}
             </div>
-            {reports.length === 0 ? (
+            {genError && (
+              <div style={{ fontFamily: 'var(--font-body)', fontSize: 11, color: 'var(--red)', background: 'var(--redx)', border: '1.5px solid var(--red)', padding: '7px 10px', marginBottom: 10, letterSpacing: '0.05em' }}>⚠ {genError}</div>
+            )}
+            {loading ? (
+              <div style={{ textAlign: 'center', padding: '30px', fontFamily: 'Special Elite', fontSize: 11, color: 'var(--ink4)', letterSpacing: '0.15em' }}>LOADING REPORTS...</div>
+            ) : loadError ? (
+              <div style={{ textAlign: 'center', padding: '30px', fontFamily: 'Special Elite', fontSize: 11, color: 'var(--red)', letterSpacing: '0.1em' }}>⚠ {loadError}</div>
+            ) : reports.length === 0 ? (
               <div style={{ textAlign: 'center', padding: '30px', fontFamily: 'Special Elite', fontSize: 11, color: 'var(--ink4)', letterSpacing: '0.15em' }}>— NO REPORTS GENERATED YET —</div>
             ) : reports.map((r, i) => (
               <div key={r.id} style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '11px 13px', border: '1px solid var(--ink5)', background: 'rgba(240,235,224,0.5)', marginBottom: 6, transition: 'all 0.15s', cursor: 'default', animation: `slideR 0.3s ${i * 0.04}s ease both` }}
                 onMouseEnter={e => { e.currentTarget.style.borderColor = 'var(--ink3)'; e.currentTarget.style.background = 'rgba(26,20,16,0.04)'; e.currentTarget.style.transform = 'translate(-1px,-1px)'; e.currentTarget.style.boxShadow = '2px 2px 0 var(--ink5)'; }}
                 onMouseLeave={e => { e.currentTarget.style.borderColor = 'var(--ink5)'; e.currentTarget.style.background = 'rgba(240,235,224,0.5)'; e.currentTarget.style.transform = ''; e.currentTarget.style.boxShadow = ''; }}>
-                <div style={{ width: 28, height: 28, border: '2px solid var(--ink3)', background: 'var(--paper)', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0, fontFamily: 'Special Elite', fontSize: 12, color: 'var(--ink3)' }}>📄</div>
+                <div style={{ width: 28, height: 28, border: '2px solid var(--ink3)', background: 'var(--paper)', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0, fontFamily: 'Special Elite', fontSize: 12, color: 'var(--ink3)' }}>PDF</div>
                 <div style={{ flex: 1, minWidth: 0 }}>
-                  <div style={{ fontFamily: 'var(--font-body)', fontSize: 12, color: 'var(--ink)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{r.name}</div>
-                  <div style={{ fontFamily: 'Special Elite', fontSize: 9, color: 'var(--ink4)', marginTop: 2 }}>{r.date} · {r.size}{r.records ? ` · ${r.records} records` : ''}</div>
+                  <div style={{ fontFamily: 'var(--font-body)', fontSize: 12, color: 'var(--ink)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{r.title}</div>
+                  <div style={{ fontFamily: 'Special Elite', fontSize: 9, color: 'var(--ink4)', marginTop: 2 }}>{new Date(r.generatedAt).toLocaleString()} · {formatBytes(r.sizeBytes)}{r.pageCount ? ` · ${r.pageCount} pg` : ''}{r.industryName ? ` · ${r.industryName}` : ''}</div>
                 </div>
                 <span className="badge b-green" style={{ flexShrink: 0 }}>READY</span>
+                <button className="btn btn-xs btn-primary" onClick={() => handleDownload(r)} style={{ fontSize: 10, letterSpacing: '0.1em' }}>DOWNLOAD</button>
                 <button className="btn btn-xs" onClick={() => delR(r.id)} style={{ color: 'var(--ink4)', borderColor: 'transparent', boxShadow: 'none' }}>DEL</button>
               </div>
             ))}

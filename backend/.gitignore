@@ -6,3 +6,6 @@ dist/
 *.log
 coverage/
 .DS_Store
+
+# Generated PDF reports & other ephemeral artifacts
+files/
